@@ -55,15 +55,11 @@ from vertica_ml_python.utilities import check_types
 ##
 class vColumn:
 	#
-	def  __init__(self, alias: str, transformations = None, parent = None):
+	def  __init__(self, alias: str, data_type: str, transformations = None, parent = None):
 		self.parent, self.alias = parent, alias
 		if (transformations == None):
 			# COLUMN DATA TYPE
-			query = "(SELECT data_type FROM columns WHERE table_name='{}' AND column_name='{}')".format(self.parent.input_relation, self.alias.replace('"', ''))
-			query += " UNION (SELECT data_type FROM view_columns WHERE table_name='{}' AND column_name='{}')".format(self.parent.input_relation, self.alias.replace('"', ''))
-			self.parent.cursor.execute(query)
-			result = self.parent.cursor.fetchone()
-			ctype = str(result[0]) if (result) else "undefined"
+			ctype = str(data_type) if (data_type) else "undefined"
 			category = category_from_type(ctype)
 			# TRANSFORMATIONS
 			self.transformations = [(alias, ctype, category)]
@@ -882,7 +878,3 @@ class vColumn:
 	#
 	def var(self):
 		return (self.aggregate(["variance"]).values[self.alias][0])
-
-
-
-

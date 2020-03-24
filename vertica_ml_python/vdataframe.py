@@ -96,20 +96,20 @@ class vDataframe:
 			self.cursor = cursor
 			# All the columns of the vDataframe
 			if (usecols == []):
-				query = "(SELECT column_name FROM columns WHERE table_name = '{}' AND table_schema = '{}')".format(self.input_relation, self.schema)
-				query += " UNION (SELECT column_name FROM view_columns WHERE table_name = '{}' AND table_schema = '{}')".format(self.input_relation, self.schema)
+				query = "(SELECT column_name, data_type FROM columns WHERE table_name = '{}' AND table_schema = '{}')".format(self.input_relation, self.schema)
+				query += " UNION (SELECT column_name, data_type FROM view_columns WHERE table_name = '{}' AND table_schema = '{}')".format(self.input_relation, self.schema)
 				cursor.execute(query)
-				columns = cursor.fetchall()
-				columns = [str(item) for sublist in columns for item in sublist]
-				columns = ['"{}"'.format(item) for item in columns]
+				meta_info = cursor.fetchall()
+				columns, data_types = zip(*meta_info)
+				columns = ['"{}"'.format(str(column)) for column in columns]
 				if (columns != []):
 					self.columns = columns
 				else:
 					raise ValueError("No table or views '{}' found.".format(self.input_relation))
 			else:
 				self.columns = [str_column(column) for column in usecols]
-			for column in self.columns:
-				new_vColumn = vColumn(column, parent = self)
+			for column, data_type in zip(self.columns, data_types):
+				new_vColumn = vColumn(column, data_type, parent = self)
 				setattr(self, column, new_vColumn)
 				setattr(self, column[1:-1], new_vColumn)
 			# Columns to not consider for the final query
@@ -1861,7 +1861,3 @@ class vDataframe:
 		return (version_id, version_release)
 
 		
-
-
-
-
