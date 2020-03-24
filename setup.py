@@ -47,7 +47,7 @@ setuptools.setup(
 	url = "https://github.com/vertica/Vertica-ML-Python",
 	packages = setuptools.find_packages(),
 	package_data = {'': ['*.csv']},
-	install_requires = ['numpy', 'math', 'time', 'os'],
+	install_requires = ['numpy'],
 	classifiers = ["Programming Language :: Python :: 3", "License :: OSI Approved :: Apache Software License", "Operating System :: OS Independent",],
 	include_package_data = True,)
 
