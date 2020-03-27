@@ -47,6 +47,7 @@ from vertica_ml_python.utilities import column_check_ambiguous
 from vertica_ml_python.utilities import check_types
 from vertica_ml_python.utilities import columns_check
 from vertica_ml_python.utilities import vdf_columns_names
+from vertica_ml_python.utilities import schema_relation
 ##
 #                                           _____    
 #   _______    ______ ____________    ____  \    \   
@@ -78,19 +79,7 @@ class vDataframe:
 				cursor = vertica_cursor(dsn)
 			self.dsn = dsn
 			if not(schema):
-				quote_nb = input_relation.count('"')
-				if (quote_nb not in (0, 2, 4)):
-					raise ValueError("The format of the input relation is incorrect.")
-				if (quote_nb == 4):
-					schema_input_relation = input_relation.split('"')[1], input_relation.split('"')[3]
-				elif (quote_nb == 4):
-					schema_input_relation = input_relation.split('"')[1], input_relation.split('"')[2][1:] if (input_relation.split('"')[0] == '') else input_relation.split('"')[0][0:-1], input_relation.split('"')[1]
-				else:
-					schema_input_relation = input_relation.split(".")
-				if (len(schema_input_relation) == 1):
-					schema, input_relation = "public", input_relation
-				else:
-					schema, input_relation = schema_input_relation[0], schema_input_relation[1]
+				schema, input_relation = schema_relation(input_relation)
 			self.schema, self.input_relation = schema.replace('"', ''), input_relation.replace('"', '')
 			# Cursor to the Vertica Database
 			self.cursor = cursor
@@ -601,9 +590,8 @@ class vDataframe:
 			of: str = "",
 			max_cardinality: tuple = (6, 6),
 			h: tuple = (None, None),
-			limit_distinct_elements: int = 200,
 			hist_type: str = "auto"):
-		check_types([("columns", columns, [list], False), ("method", method, ["density", "count", "avg", "min", "max", "sum"], True), ("of", of, [str], False), ("max_cardinality", max_cardinality, [tuple], False), ("h", h, [tuple], False), ("limit_distinct_elements", limit_distinct_elements, [int, float], False), ("hist_type", hist_type, ["auto", "fully_stacked", "stacked", "fully", "fully stacked"], True)])
+		check_types([("columns", columns, [list], False), ("method", method, ["density", "count", "avg", "min", "max", "sum"], True), ("of", of, [str], False), ("max_cardinality", max_cardinality, [tuple], False), ("h", h, [tuple], False), ("hist_type", hist_type, ["auto", "fully_stacked", "stacked", "fully", "fully stacked"], True)])
 		columns_check(columns, self, [1, 2])
 		columns = vdf_columns_names(columns, self)
 		if (of):
@@ -618,7 +606,7 @@ class vDataframe:
 			elif (hist_type.lower() == "stacked"):
 				stacked = True
 			from vertica_ml_python.plot import bar2D
-			bar2D(self, columns, method, of, max_cardinality, h, limit_distinct_elements, stacked, fully_stacked)
+			bar2D(self, columns, method, of, max_cardinality, h, stacked, fully_stacked)
 		return (self)
 	# 
 	def beta(self, columns: list = [], focus: str = ""):
@@ -950,17 +938,17 @@ class vDataframe:
 		if column_check_ambiguous(name, self.get_columns()):
 			raise ValueError("A Virtual Column has already the alias {}.\nBy changing the parameter 'name', you'll be able to solve this issue.".format(name))
 		tmp_name = "_vpython" + str(np.random.randint(10000000)) + "_"
-		self.executeSQL(query = "DROP TABLE IF EXISTS " + tmp_name, title = "Drop the existing generated table")
+		self.executeSQL(query = "DROP TABLE IF EXISTS {}.{}".format(str_column(self.schema), tmp_name), title = "Drop the existing generated table")
 		try:
-			query = "CREATE TEMPORARY TABLE {} AS SELECT {} AS {} FROM {} LIMIT 20".format(tmp_name, expr, name, self.genSQL())
+			query = "CREATE TEMPORARY TABLE {}.{} ON COMMIT PRESERVE ROWS AS SELECT {} AS {} FROM {} LIMIT 20".format(str_column(self.schema), tmp_name, expr, name, self.genSQL())
 			self.executeSQL(query = query, title = "Create a temporary table to test if the new feature is correct")
 		except:
-			self.executeSQL(query = "DROP TABLE IF EXISTS " + tmp_name, title = "Drop the temporary table")
+			self.executeSQL(query = "DROP TABLE IF EXISTS {}.{}".format(str_column(self.schema), tmp_name), title = "Drop the temporary table")
 			raise ValueError("The expression '{}' seems to be incorrect.\nBy turning on the SQL with the 'sql_on_off' method, you'll print the SQL code generation and probably see why the evaluation didn't work.".format(expr))
-		query = "SELECT data_type FROM columns WHERE column_name = '{}' AND table_name = '{}'".format(name.replace('"', ''), tmp_name)
+		query = "SELECT data_type FROM columns WHERE column_name = '{}' AND table_name = '{}' AND table_schema = '{}'".format(name.replace('"', ''), tmp_name, self.schema.replace('"', ''))
 		self.executeSQL(query = query, title = "Catch the new feature's type")
 		ctype = self.cursor.fetchone()[0]
-		self.executeSQL(query = "DROP TABLE IF EXISTS " + tmp_name, title = "Drop the temporary table")
+		self.executeSQL(query = "DROP TABLE IF EXISTS {}.{}".format(str_column(self.schema), tmp_name), title = "Drop the temporary table")
 		ctype = ctype if (ctype) else "undefined"
 		category = category_from_type(ctype = ctype)
 		vDataframe_maxfloor_length = len(max([self[column].transformations for column in self.get_columns()], key = len))
@@ -1174,10 +1162,13 @@ class vDataframe:
 					use_numbers_as_suffix: bool = False):
 		check_types([("columns", columns, [list], False), ("max_cardinality", max_cardinality, [int, float], False), ("prefix_sep", prefix_sep, [str], False), ("drop_first", drop_first, [bool], False), ("use_numbers_as_suffix", use_numbers_as_suffix, [bool], False)])
 		columns_check(columns, self)
+		cols_hand = True if (columns) else False
 		columns = self.get_columns() if not(columns) else vdf_columns_names(columns, self)
 		for column in columns:
 			if (self[column].nunique() < max_cardinality):
 				self[column].get_dummies("", prefix_sep, drop_first, use_numbers_as_suffix)
+			elif (cols_hand):
+				print("/!\\ Warning: The Virtual Column {} was ignored because of its high cardinality\nIncrease the parameter 'max_cardinality' to solve this issue or use directly the Virtual Column get_dummies method".format(column))
 		return (self)
 	# 
 	def groupby(self, columns: list, expr: list = []):
@@ -1216,9 +1207,8 @@ class vDataframe:
 			 of: str = "",
 			 max_cardinality: tuple = (6, 6),
 			 h: tuple = (None, None),
-			 limit_distinct_elements: int = 200,
 			 hist_type: str = "auto"):
-		check_types([("columns", columns, [list], False), ("method", method, ["density", "count", "avg", "min", "max", "sum"], True), ("of", of, [str], False), ("max_cardinality", max_cardinality, [tuple], False), ("h", h, [tuple], False), ("limit_distinct_elements", limit_distinct_elements, [int, float], False), ("hist_type", hist_type, ["auto", "multi", "stacked"], True)])
+		check_types([("columns", columns, [list], False), ("method", method, ["density", "count", "avg", "min", "max", "sum"], True), ("of", of, [str], False), ("max_cardinality", max_cardinality, [tuple], False), ("h", h, [tuple], False), ("hist_type", hist_type, ["auto", "multi", "stacked"], True)])
 		columns_check(columns, self, [2])
 		columns = vdf_columns_names(columns, self)
 		if (of):
@@ -1235,7 +1225,7 @@ class vDataframe:
 				multiple_hist(self, columns, method, of, h_0)
 			else:
 				from vertica_ml_python.plot import hist2D
-				hist2D(self, columns, method, of, max_cardinality, h, limit_distinct_elements, stacked)
+				hist2D(self, columns, method, of, max_cardinality, h, stacked)
 		return (self)
 	# 
 	def info(self):
@@ -1398,10 +1388,9 @@ class vDataframe:
 					max_cardinality: tuple = (20, 20),
 					show: bool = True,
 					cmap: str = '',
-					limit_distinct_elements: int = 1000,
 					with_numbers: bool = True):
-		check_types([("columns", columns, [list], False), ("method", method, ["density", "count", "avg", "min", "max", "sum"], True), ("of", of, [str], False), ("max_cardinality", max_cardinality, [tuple], False), ("h", h, [tuple], False), ("cmap", cmap, [str], False), ("show", show, [bool], False), ("limit_distinct_elements", limit_distinct_elements, [int, float], False), ("with_numbers", with_numbers, [bool], False)])
-		columns_check(columns, self, [2])
+		check_types([("columns", columns, [list], False), ("method", method, ["density", "count", "avg", "min", "max", "sum"], True), ("of", of, [str], False), ("max_cardinality", max_cardinality, [tuple], False), ("h", h, [tuple], False), ("cmap", cmap, [str], False), ("show", show, [bool], False), ("with_numbers", with_numbers, [bool], False)])
+		columns_check(columns, self, [1, 2])
 		columns = vdf_columns_names(columns, self)
 		if (of):
 			columns_check([of], self)
@@ -1410,7 +1399,7 @@ class vDataframe:
 			from vertica_ml_python.plot import gen_cmap
 			cmap = gen_cmap()[0]
 		from vertica_ml_python.plot import pivot_table
-		return (pivot_table(self, columns, method, of, h, max_cardinality, show, cmap, limit_distinct_elements, with_numbers))
+		return (pivot_table(self, columns, method, of, h, max_cardinality, show, cmap, with_numbers))
 	#
 	def plot(self, 
 		     ts: str,
@@ -1606,8 +1595,6 @@ class vDataframe:
 				raise NameError("The Virtual Column {} doesn't exist".format(column))
 		for column in self.columns:
 			max_pos = max(max_pos, len(self[column].transformations) - 1)
-		print(max_pos)
-		print(self.order_by)
 		self.order_by[max_pos] = " ORDER BY {} {}".format(", ".join(columns), "DESC" if (desc) else "ASC")
 		return (self)
 	# 
@@ -1771,10 +1758,11 @@ class vDataframe:
 		vdf.cursor = self.cursor
 		vdf.query_on = self.query_on
 		vdf.time_on = self.time_on
-		self.executeSQL(query = "DROP TABLE IF EXISTS _vpython_{}_test_; CREATE TEMPORARY TABLE _vpython_{}_test_ AS SELECT * FROM {} LIMIT 10;".format(func, func, table), title = "Test {}".format(func))
-		self.executeSQL(query = "SELECT column_name, data_type FROM columns where table_name = '_vpython_{}_test_'".format(func), title = "SELECT NEW DATA TYPE AND THE COLUMNS NAME")
+		self.executeSQL(query = "DROP TABLE IF EXISTS {}._vpython_{}_test_;".format(str_column(self.schema), func), title = "Drop the Existing Temp Table")
+		self.executeSQL(query = "CREATE TEMPORARY TABLE {}._vpython_{}_test_ ON COMMIT PRESERVE ROWS AS SELECT * FROM {} LIMIT 10;".format(str_column(self.schema), func, table))
+		self.executeSQL(query = "SELECT column_name, data_type FROM columns where table_name = '_vpython_{}_test_' AND table_schema = '{}'".format(func, self.schema.replace('"', '')), title = "SELECT NEW DATA TYPE AND THE COLUMNS NAME")
 		result = self.cursor.fetchall()
-		self.executeSQL(query = "DROP TABLE IF EXISTS _vpython_{}_test_;".format(func), title = "DROP TEMPORARY TABLE")
+		self.executeSQL(query = "DROP TABLE IF EXISTS {}._vpython_{}_test_;".format(str_column(self.schema), func), title = "Drop the Temp Table")
 		vdf.columns = ['"{}"'.format(item[0]) for item in result]
 		vdf.where = []
 		vdf.order_by = ['' for i in range(100)]
